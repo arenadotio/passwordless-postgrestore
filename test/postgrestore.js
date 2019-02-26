@@ -17,14 +17,23 @@ function TokenStoreFactory(options) {
 }
 
 var conString = 'postgres://localhost';
-var pgClient = new pg.Pool(conString);
-
-pgClient.connect(function (err) {
-	if (err) {
-		done(err);
-		throw new Error('Could not connect to Postgres database, with error : ' + err);
-	}
-});
+var pgClient = new pg.Pool(conString)
+	.connect()
+	.then(pgClient =>
+		pgClient.query(`
+				CREATE TABLE IF NOT EXISTS passwordless
+				(
+					id serial NOT NULL,
+					uid character varying(160),
+					token character varying(60) NOT NULL,
+					origin text,
+					ttl bigint,
+					CONSTRAINT passwordless_pkey PRIMARY KEY (id),
+					CONSTRAINT passwordless_token_key UNIQUE (token),
+					CONSTRAINT passwordless_uid_key UNIQUE (uid)
+				)`)
+			.then(() => pgClient)
+  );
 
 var beforeEachTest = function(done) {
 	done();
@@ -71,13 +80,14 @@ describe('Specific tests', function() {
 		store.storeOrUpdate(token, user,
 			1000*60, 'http://' + chance.domain() + '/page.html',
 			function() {
-                pgClient.query('SELECT * FROM passwordless WHERE uid=$1',[user], function(err, obj) {
-					expect(err).to.not.exist;
-					expect(obj).to.exist;
-					expect(obj.rows[0].token).to.exist;
-					expect(obj.rows[0].token).to.not.equal(token);
-					done();
-				})
+				pgClient.then(pgClient =>
+					pgClient.query('SELECT * FROM passwordless WHERE uid=$1',[user], function(err, obj) {
+						expect(err).to.not.exist;
+						expect(obj).to.exist;
+						expect(obj.rows[0].token).to.exist;
+						expect(obj.rows[0].token).to.not.equal(token);
+						done();
+					}));
 			});
 	});
 
@@ -88,13 +98,14 @@ describe('Specific tests', function() {
 		store.storeOrUpdate(token, user,
 			1000 * 60, 'http://' + chance.domain() + '/page.html',
 			function () {
-				pgClient.query('SELECT token FROM passwordless WHERE uid=$1', [user], function (err, obj) {
-					expect(err).to.not.exist;
-					expect(obj).to.exist;
-					expect(obj.rows[0].token).to.exist;
-					expect(bcrypt.getRounds(obj.rows[0].token)).to.equal(5);
-					done();
-				})
+				pgClient.then(pgClient =>
+					pgClient.query('SELECT token FROM passwordless WHERE uid=$1', [user], function (err, obj) {
+						expect(err).to.not.exist;
+						expect(obj).to.exist;
+						expect(obj.rows[0].token).to.exist;
+						expect(bcrypt.getRounds(obj.rows[0].token)).to.equal(5);
+						done();
+					}));
 			});
 	});
 
@@ -106,23 +117,24 @@ describe('Specific tests', function() {
 		store.storeOrUpdate(token, user,
 			1000*60, 'http://' + chance.domain() + '/page.html',
 			function() {
-                pgClient.query('SELECT * FROM passwordless WHERE uid=$1',[user], function(err, obj) {
-					expect(err).to.not.exist;
-					expect(obj).to.exist;
-					expect(obj.rows[0].token).to.exist;
-					hashedToken1 = obj.rows[0].token;
-					store.storeOrUpdate(token, user,
-						1000*60, 'http://' + chance.domain() + '/page.html',
-						function() {
-                            pgClient.query('SELECT * FROM passwordless WHERE uid=$1',[user], function(err, obj) {
-								expect(err).to.not.exist;
-								expect(obj).to.exist;
-								expect(obj.rows[0].token).to.exist;
-								expect(obj.rows[0].token).to.not.equal(hashedToken1);
-								done();
+				pgClient.then(pgClient =>
+					pgClient.query('SELECT * FROM passwordless WHERE uid=$1',[user], function(err, obj) {
+						expect(err).to.not.exist;
+						expect(obj).to.exist;
+						expect(obj.rows[0].token).to.exist;
+						hashedToken1 = obj.rows[0].token;
+						store.storeOrUpdate(token, user,
+							1000*60, 'http://' + chance.domain() + '/page.html',
+							function() {
+								pgClient.query('SELECT * FROM passwordless WHERE uid=$1',[user], function(err, obj) {
+									expect(err).to.not.exist;
+									expect(obj).to.exist;
+									expect(obj.rows[0].token).to.exist;
+									expect(obj.rows[0].token).to.not.equal(hashedToken1);
+									done();
+								});
 							});
-						});
-				})
+					}));
 			});
 	});
 });
